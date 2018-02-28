@@ -26,6 +26,7 @@ class FaceRecognition:
 
 class CNN():
     def __init__(self):
+        self.layer_outputs = {}
         self.layers = []
         self.expected = {}
         self.pool_size = 2
@@ -40,53 +41,82 @@ class CNN():
         self.expected = _expected
 
 
-    def error(self, cnn_out, expected_person):
+    def cross_entropy_error(self, cnn_out, expected_person, func):
+        # TODO - function passed - there are two versions of cross entropy - which one should I use?
         y = self.expected[expected_person]
-        return self.cross_entropy(cnn_out, y)
+        return func(cnn_out, y)
 
     def back_propagation(self, X, expected_person):
+        y = self.expected[expected_person]
         cnn_out = self.forward_propagation(X)
-        cnn_error = self.error(cnn_out, expected_person)
+        cross_entropy_error = self.cross_entropy_error(cnn_out, expected_person, self.cross_entropy)
+
+        layer_10_error = self.cross_entropy_softmax_delta(cnn_out, y) # predicted - expected
+        layer_10_delta = np.dot(np.asmatrix(self.layer_outputs["layer_8"]).T, np.asmatrix(layer_10_error))
+
+        # (y-y') * x.T
+        relu_deriv = self.relu_layer(self.layer_outputs["layer_7"], deriv=True)
+        layer_7_error = np.asarray(np.dot(layer_10_error, np.asmatrix(self.layers[10]['param_0']).T)) * relu_deriv
+        layer_7_delta = np.dot(np.asmatrix(self.layer_outputs["layer_5"]).T, layer_7_error)
+
+        # x.T x ((y-y') x w2.T ) * deriv_relu)
+        print(np.max(layer_7_delta))
+        print(np.min(layer_7_delta))
+        #
+        # print(layer_8_update.shape)
+        #
+
+        # x = np.dot((cross_entropy_delta * self.layers[10]["param_0"]).T, self.relu_layer(self.layer_outputs["layer_8"], deriv = True))
+        # layer_8_update = np.dot(self.layer_outputs["layer_8"].T, x) #TODO !!!!!!!!!
+
+
+        #
+        # update = self.layers[10]['param_0'] * cross_entropy_delta
+        # # print(update.shape)
+        # self.layers[10]['param_0'] = self.layers[10]['param_0'] + update
+        # # trzeba cross_entropy_delta pomnozyc przez derivative of inner function ( in out case softmax)
+
+
+        # k2_delta = cnn_error * self.cross_entropy(cnn_out, y, deriv=True)
+        # plt.plot(cross_entropy_delta)
+        # plt.show()
         # L_delta = cnn_error * self.relu_layer(cnn_out, deriv=True)
-        print(cnn_error)
+        # print(cnn_error)
         # print("Error:" + str(np.mean(np.abs(cnn_error))))
 
     def forward_propagation(self, X):
-        print(X.shape)
         h = self.cnn_layer(X)
-        X = h
-        print(X.shape)
-        h = self.relu_layer(X)
-        X = h
-        h = self.cnn_layer(X, layer_i=2, border_mode="valid")
-        X = h
-        print(X.shape)
-        h = self.relu_layer(X)
-        X = h
-        h = self.maxpooling_layer(X)
-        X = h
-        print(X.shape)
-        h = self.flatten_layer(X)
-        X = h
-        print("flat")
-        print(X.shape)
-        print(np.min(X))
-        print(np.max(X))
-        h = self.dense_layer(X, layer_i=7)
-        X = h # have to prepare better weight dimenstions for that
-        h = self.relu_layer(X)
-        X = h
+        self.layer_outputs["layer_0"] = h
+
+        h = self.relu_layer(h)
+        self.layer_outputs["layer_1"] = h
+
+        h = self.cnn_layer(h, layer_i=2, border_mode="valid")
+        self.layer_outputs["layer_2"] = h
+
+        h = self.relu_layer(h)
+        self.layer_outputs["layer_3"] = h
+
+        h = self.maxpooling_layer(h)
+        self.layer_outputs["layer_4"] = h
+
+        h = self.flatten_layer(h)
+        self.layer_outputs["layer_5"] = h
+
+        h = self.dense_layer(h, layer_i=7)
+        self.layer_outputs["layer_7"] = h
+
+        h = self.relu_layer(h)
+        self.layer_outputs["layer_8"] = h
+
         # h = self.dropout_layer(X, .5)
         # X = h
-        h = self.dense_layer(X, layer_i=10)
+
+        h = self.dense_layer(h, layer_i=10)
+        self.layer_outputs["layer_10"] = h
+
+        h = self.softmax_layer2D(h)
         X = h
-        # print(X.shape)
-        h = self.normalize(X, -10, 10)
-        X = h
-        h = self.softmax_layer2D(X)
-        X = h
-        plt.plot(X)
-        plt.show()
         return X
 
     def predict(self, X):
@@ -113,14 +143,8 @@ class CNN():
             for channel in range(image_channels):
                 feature = features[feature_i, 0, :, :]
                 image = X[channel, :, :]
-                # print("XXX")
-                # print(X.shape)
-                # cv2.imshow('image', image)
-                # cv2.waitKey(0)
                 convolved_image += self.convolve2d(image, feature, border_mode)
             convolved_image = convolved_image/image_channels + bias[feature_i]
-            # cv2.imshow('image', convolved_image)
-            # cv2.waitKey(0)
             convolved_features[feature_i, :, :] = convolved_image
         return convolved_features
 
@@ -128,6 +152,8 @@ class CNN():
         W = self.layers[layer_i]["param_0"]
         b = self.layers[layer_i]["param_1"]
         output = np.dot(X, W) + b
+        # plt.plot(output, '*')
+        # plt.show()
         return output
 
 
@@ -136,20 +162,13 @@ class CNN():
         m = min(x)
         range = max(x) - m
         x = (x - m) / range
-
         range2 = r_2 - r_1
         return (x * range2) + r_1
 
     @staticmethod
     def convolve2d(image, feature, border_mode="full"):
         image_dim = np.array(image.shape)
-        # print("image_dim")
-        # print(image_dim)
         feature_dim = np.array(feature.shape)
-        # print("feature_dim")
-        # print(feature_dim)
-        # print("image_dim")
-        # print(image_dim)
         target_dim = image_dim + feature_dim - 1
         fft_result = np.fft.fft2(image, target_dim) * np.fft.fft2(feature, target_dim)
         target = np.fft.ifft2(fft_result).real
@@ -186,9 +205,7 @@ class CNN():
         return pooled_features
 
     @staticmethod
-    def cross_entropy(X, y, deriv = False):
-        if deriv == True:
-            return X - y
+    def cross_entropy(X, y):
         y = y.astype(int)
         m = y.shape[0]
         log_likelihood = []
@@ -198,6 +215,22 @@ class CNN():
         loss = np.sum(log_likelihood) / m
         return loss
 
+    @staticmethod
+    def cross_entropy_softmax_delta(X, y):
+        return X - y
+
+    # @staticmethod
+    # def cross_entropy_v2(X, y, deriv = False):
+    #     if deriv == True:
+    #         return -1 * (( y * (1/X)+ ( 1 - y)* (1/(1 - X))))
+    #     y = y.astype(int)
+    #     m = y.shape[0]
+    #     log_likelihood = []
+    #     for i in range(m):
+    #         factor = - (y[i] * np.log(X[i]) + (1 - y[i])*np.log(1-X[i]))
+    #         log_likelihood.append(factor)
+    #     loss = np.sum(log_likelihood) / m
+    #     return loss
 
     @staticmethod
     def relu_layer(x, deriv = False):
@@ -210,6 +243,7 @@ class CNN():
 
     @staticmethod
     def softmax_layer2D(w, deriv = False):
+        # max = np.max(w)
         e = np.exp(w)
         softmax = e / np.sum(e, axis=0, keepdims=True)
         if deriv == True:
@@ -242,4 +276,4 @@ x = cv2.imread("test_image.jpg")
 x_swap = np.einsum('kli->ilk', x)
 fr = FaceRecognition()
 # print(fr.predict(np.asarray(x_swap)))
-print(fr.train(np.asarray(x_swap), 'Aaron_Eckhart'))
+fr.train(np.asarray(x_swap), 'Lena_Olin')
