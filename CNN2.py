@@ -54,14 +54,25 @@ class CNN():
         layer_10_error = self.cross_entropy_softmax_delta(cnn_out, y) # predicted - expected
         layer_10_delta = np.dot(np.asmatrix(self.layer_outputs["layer_8"]).T, np.asmatrix(layer_10_error))
 
-        # (y-y') * x.T
+        #x.T *(y-y')
         relu_deriv = self.relu_layer(self.layer_outputs["layer_7"], deriv=True)
         layer_7_error = np.asarray(np.dot(layer_10_error, np.asmatrix(self.layers[10]['param_0']).T)) * relu_deriv
         layer_7_delta = np.dot(np.asmatrix(self.layer_outputs["layer_5"]).T, layer_7_error)
 
+        yy = np.asarray(layer_7_error.dot(self.layers[7]["param_0"].T)[0,:])
+        yyy = yy.reshape((32, 38, 38))
+        xx = self.flatten_layer(yyy)
+        print(xx.shape)
+        if np.array_equal(xx, yy):
+            print("SUCESS")
+        else:
+            print("DUPA")
+        # print(yyy.shape)
+
+        print(yy.shape)
         # x.T x ((y-y') x w2.T ) * deriv_relu)
-        print(np.max(layer_7_delta))
-        print(np.min(layer_7_delta))
+        # print(np.max(layer_7_delta))
+        # print(np.min(layer_7_delta))
         #
         # print(layer_8_update.shape)
         #
@@ -97,14 +108,19 @@ class CNN():
         h = self.relu_layer(h)
         self.layer_outputs["layer_3"] = h
 
-        h = self.maxpooling_layer(h)
-        self.layer_outputs["layer_4"] = h
+        print("maxpool_before")
+        print(h.shape)
+        (h, indexes) = self.maxpooling_layer(h)
+        self.layer_outputs["layer_4"] = (h, indexes)
+        print("maxpool_after")
+        print(h.shape)
 
         h = self.flatten_layer(h)
         self.layer_outputs["layer_5"] = h
 
         h = self.dense_layer(h, layer_i=7)
-        self.layer_outputs["layer_7"] = h
+        self.layer_outputs["layer_7"] = h #bacpropagated
+        print(self.layers[7]['param_0'].shape)
 
         h = self.relu_layer(h)
         self.layer_outputs["layer_8"] = h
@@ -113,7 +129,7 @@ class CNN():
         # X = h
 
         h = self.dense_layer(h, layer_i=10)
-        self.layer_outputs["layer_10"] = h
+        self.layer_outputs["layer_10"] = h #bacpropagated
 
         h = self.softmax_layer2D(h)
         X = h
@@ -191,6 +207,8 @@ class CNN():
         res_dim = int(conv_dim / self.pool_size)  # assumed square shape
 
         pooled_features = np.zeros((nb_features, res_dim, res_dim))
+        pooled_indexes = np.zeros((nb_features, res_dim, res_dim), dtype= ('float32, float32')) # just for backpropagation
+        print(pooled_indexes.size)
         for feature_i in range(nb_features):
             for pool_row in range(res_dim):
                 row_start = pool_row * self.pool_size
@@ -201,8 +219,19 @@ class CNN():
                     col_end = col_start + self.pool_size
 
                     patch = convolved_features[feature_i, row_start: row_end, col_start: col_end]
+                    pooled_arg_max = np.argmax(patch)
+                    # calculate index from original image that was taken further by maxpool layer
+                    if pooled_arg_max == 0:
+                        max_index = (row_start, col_start)
+                    if pooled_arg_max == 1:
+                        max_index = (row_start, col_start+1)
+                    if pooled_arg_max == 2:
+                        max_index = (row_start+1, col_start)
+                    if pooled_arg_max == 3:
+                        max_index = (row_start+1, col_start+1)
                     pooled_features[feature_i, pool_row, pool_col] = np.max(patch)
-        return pooled_features
+                    pooled_indexes[feature_i, pool_row, pool_col] = max_index
+        return (pooled_features, pooled_indexes)
 
     @staticmethod
     def cross_entropy(X, y):
